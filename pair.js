@@ -20,13 +20,12 @@ function removeFile(FilePath){
 router.get('/', async (req, res) => {
     const id = makeid();
     let num = req.query.number;
-    let reconnectAttempts = 0;
-    const MAX_RECONNECT_ATTEMPTS = 3;
-
-    async function GIFTED_MD_PAIR_CODE() {
-        const { state, saveCreds } = await useMultiFileAuthState(`./temp/${id}`);
-        
-        try {
+        async function GIFTED_MD_PAIR_CODE() {
+        const {
+            state,
+            saveCreds
+        } = await useMultiFileAuthState('./temp/'+id)
+     try {
             let Pair_Code_By_Gifted_Tech = Gifted_Tech({
                 auth: {
                     creds: state.creds,
@@ -34,70 +33,68 @@ router.get('/', async (req, res) => {
                 },
                 printQRInTerminal: false,
                 logger: pino({level: "fatal"}).child({level: "fatal"}),
-                browser: Browsers.ubuntu('Chrome'), // More stable browser identification
-                markOnlineOnConnect: false, // Reduce connection pressure
-                syncFullHistory: false // Don't load full chat history
-            });
+                browser: ["Chrome (Linux)", "", ""]
+             });
+             if(!Pair_Code_By_Gifted_Tech.authState.creds.registered) {
+                await delay(1500);
+                        num = num.replace(/[^0-9]/g,'');
+                            const code = await Pair_Code_By_Gifted_Tech.requestPairingCode(num)
+                 if(!res.headersSent){
+                 await res.send({code});
+                     }
+                 }
+            Pair_Code_By_Gifted_Tech.ev.on('creds.update', saveCreds)
+            Pair_Code_By_Gifted_Tech.ev.on("connection.update", async (s) => {
+                const {
+                    connection,
+                    lastDisconnect
+                } = s;
+                if (connection == "open") {
+                await delay(5000);
+                let data = fs.readFileSync(__dirname + `/temp/${id}/creds.json`);
+                await delay(800);
+               let b64data = Buffer.from(data).toString('base64');
+               let session = await Pair_Code_By_Gifted_Tech.sendMessage(Pair_Code_By_Gifted_Tech.user.id, { text: '' + b64data });
 
-            // Connection handling
-            Pair_Code_By_Gifted_Tech.ev.on('connection.update', async (update) => {
-                const { connection, lastDisconnect } = update;
-                
-                if (connection === 'open') {
-                    reconnectAttempts = 0; // Reset on successful connection
-                    console.log('Connected to WhatsApp successfully');
-                    
-                    try {
-                        if (!Pair_Code_By_Gifted_Tech.authState.creds.registered) {
-                            num = num.replace(/[^0-9]/g, '');
-                            const code = await Pair_Code_By_Gifted_Tech.requestPairingCode(num);
-                            
-                            if (!res.headersSent) {
-                                res.send({ code });
-                            }
-                        } else {
-                            // Send success message
-                            const GIFTED_MD_TEXT = `...`; // Your message here
-                            await Pair_Code_By_Gifted_Tech.sendMessage(
-                                Pair_Code_By_Gifted_Tech.user.id,
-                                { text: GIFTED_MD_TEXT }
-                            );
-                        }
-                    } catch (msgError) {
-                        console.error('Message sending error:', msgError);
-                    }
+               let GIFTED_MD_TEXT = `
+*_Pair Code Connected by WASI TECH*
+*_Made With 🤍_*
+______________________________________
+╔════◇
+║ *『 WOW YOU'VE CHOSEN WASI MD 』*
+║ _You Have Completed the First Step to Deploy a Whatsapp Bot._
+╚════════════════════════╝
+╔═════◇
+║  『••• 𝗩𝗶𝘀𝗶𝘁 𝗙𝗼𝗿 𝗛𝗲𝗹𝗽 •••』
+║❒ *Ytube:* _youtube.com/@wasitech1_
+║❒ *Owner:* _https://wa.me/923192173398_
+║❒ *Repo:* _https://github.com/wasixd/WASI-MD
+║❒ *WaGroup:* _https://whatsapp.com/channel/0029VaDK8ZUDjiOhwFS1cP2j
+║❒ *WaChannel:* _https://whatsapp.com/channel/0029VaDK8ZUDjiOhwFS1cP2j
+║❒ *Plugins:* _https://github.com/wasixd/WASI-MD-PLUGINS_
+╚════════════════════════╝
+_____________________________________
+
+_Don't Forget To Give Star To My Repo_`
+ await Pair_Code_By_Gifted_Tech.sendMessage(Pair_Code_By_Gifted_Tech.user.id,{text:GIFTED_MD_TEXT},{quoted:session})
+ 
+
+        await delay(100);
+        await Pair_Code_By_Gifted_Tech.ws.close();
+        return await removeFile('./temp/'+id);
+            } else if (connection === "close" && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode != 401) {
+                    await delay(10000);
+                    GIFTED_MD_PAIR_CODE();
                 }
-                
-                if (connection === 'close') {
-                    if (lastDisconnect?.error?.output?.statusCode !== 401) {
-                        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                            reconnectAttempts++;
-                            console.log(`Attempting reconnect #${reconnectAttempts}`);
-                            await delay(10000 * reconnectAttempts); // Exponential backoff
-                            GIFTED_MD_PAIR_CODE();
-                        } else {
-                            console.log('Max reconnection attempts reached');
-                            await removeFile(`./temp/${id}`);
-                        }
-                    } else {
-                        console.log('Authentication error - please restart pairing');
-                        await removeFile(`./temp/${id}`);
-                    }
-                }
             });
-
-            // Creds update handler
-            Pair_Code_By_Gifted_Tech.ev.on('creds.update', saveCreds);
-
         } catch (err) {
-            console.error("Initialization error:", err);
-            await removeFile(`./temp/${id}`);
-            if (!res.headersSent) {
-                res.status(500).send({ code: "Service Unavailable" });
-            }
+            console.log("service restated");
+            await removeFile('./temp/'+id);
+         if(!res.headersSent){
+            await res.send({code:"Service Unavailable"});
+         }
         }
     }
-
-    return GIFTED_MD_PAIR_CODE();
+    return await GIFTED_MD_PAIR_CODE()
 });
 module.exports = router
