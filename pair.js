@@ -1,100 +1,146 @@
-const PastebinAPI = require('pastebin-js'),
-pastebin = new PastebinAPI('EMWTMkQAVfJa9kM-MRUrxd5Oku1U7pgL')
-const {makeid} = require('./id');
+const { makeid } = require('./id');
 const express = require('express');
 const fs = require('fs');
-let router = express.Router()
 const pino = require("pino");
 const {
-    default: Gifted_Tech,
     useMultiFileAuthState,
-    delay,
     makeCacheableSignalKeyStore,
-    Browsers
+    delay
 } = require("maher-zubair-baileys");
 
-function removeFile(FilePath){
-    if(!fs.existsSync(FilePath)) return false;
-    fs.rmSync(FilePath, { recursive: true, force: true })
- };
+const router = express.Router();
+const logger = pino({ level: "fatal" }).child({ level: "fatal" });
+
+// Cache for active sessions
+const activeSessions = new Map();
+
+// Cleanup function
+function removeSessionFiles(id) {
+    const dirPath = `./temp/${id}`;
+    if (fs.existsSync(dirPath)) {
+        fs.rmSync(dirPath, { recursive: true, force: true });
+    }
+    activeSessions.delete(id);
+}
+
+// Session timeout (30 minutes)
+const SESSION_TIMEOUT = 30 * 60 * 1000;
+
 router.get('/', async (req, res) => {
     const id = makeid();
-    let num = req.query.number;
-        async function GIFTED_MD_PAIR_CODE() {
-        const {
+    const num = req.query.number;
+    
+    if (!num || num.replace(/[^0-9]/g, "").length < 11) {
+        return res.status(400).json({ error: "Invalid number format" });
+    }
+
+    const cleanNum = num.replace(/[^0-9]/g, '');
+    
+    try {
+        const { state, saveCreds } = await useMultiFileAuthState(`./temp/${id}`);
+        
+        const session = {
+            id,
+            createdAt: Date.now(),
+            cleanNum,
             state,
             saveCreds
-        } = await useMultiFileAuthState('./temp/'+id)
-     try {
-            let Pair_Code_By_Gifted_Tech = Gifted_Tech({
-                auth: {
-                    creds: state.creds,
-                    keys: makeCacheableSignalKeyStore(state.keys, pino({level: "fatal"}).child({level: "fatal"})),
-                },
-                printQRInTerminal: false,
-                logger: pino({level: "fatal"}).child({level: "fatal"}),
-                browser: ["Chrome (Linux)", "", ""]
-             });
-             if(!Pair_Code_By_Gifted_Tech.authState.creds.registered) {
-                await delay(1500);
-                        num = num.replace(/[^0-9]/g,'');
-                            const code = await Pair_Code_By_Gifted_Tech.requestPairingCode(num)
-                 if(!res.headersSent){
-                 await res.send({code});
-                     }
-                 }
-            Pair_Code_By_Gifted_Tech.ev.on('creds.update', saveCreds)
-            Pair_Code_By_Gifted_Tech.ev.on("connection.update", async (s) => {
-                const {
-                    connection,
-                    lastDisconnect
-                } = s;
-                if (connection == "open") {
-                await delay(5000);
-                let data = fs.readFileSync(__dirname + `/temp/${id}/creds.json`);
-                await delay(800);
-               let b64data = Buffer.from(data).toString('base64');
-               let session = await Pair_Code_By_Gifted_Tech.sendMessage(Pair_Code_By_Gifted_Tech.user.id, { text: '' + b64data });
+        };
+        
+        activeSessions.set(id, session);
+        
+        // Set timeout for session cleanup
+        setTimeout(() => {
+            if (activeSessions.has(id)) {
+                removeSessionFiles(id);
+            }
+        }, SESSION_TIMEOUT);
 
-               let GIFTED_MD_TEXT = `
-*_Pair Code Connected by WASI TECH*
-*_Made With 🤍_*
-______________________________________
-╔════◇
-║ *『 WOW YOU'VE CHOSEN WASI MD 』*
-║ _You Have Completed the First Step to Deploy a Whatsapp Bot._
-╚════════════════════════╝
-╔═════◇
-║  『••• 𝗩𝗶𝘀𝗶𝘁 𝗙𝗼𝗿 𝗛𝗲𝗹𝗽 •••』
-║❒ *Ytube:* _youtube.com/@wasitech1_
-║❒ *Owner:* _https://wa.me/923192173398_
-║❒ *Repo:* _https://github.com/wasixd/WASI-MD
-║❒ *WaGroup:* _https://whatsapp.com/channel/0029VaDK8ZUDjiOhwFS1cP2j
-║❒ *WaChannel:* _https://whatsapp.com/channel/0029VaDK8ZUDjiOhwFS1cP2j
-║❒ *Plugins:* _https://github.com/wasixd/WASI-MD-PLUGINS_
-╚════════════════════════╝
-_____________________________________
+        const Pair_Code_By_Gifted_Tech = Gifted_Tech({
+            auth: {
+                creds: state.creds,
+                keys: makeCacheableSignalKeyStore(state.keys, logger),
+            },
+            printQRInTerminal: false,
+            logger,
+            browser: ["Chrome (Linux)", "", ""],
+            connectTimeoutMs: 30_000,
+            keepAliveIntervalMs: 25_000
+        });
 
-_Don't Forget To Give Star To My Repo_`
- await Pair_Code_By_Gifted_Tech.sendMessage(Pair_Code_By_Gifted_Tech.user.id,{text:GIFTED_MD_TEXT},{quoted:session})
- 
+        if (!Pair_Code_By_Gifted_Tech.authState.creds.registered) {
+            await delay(1500);
+            const code = await Pair_Code_By_Gifted_Tech.requestPairingCode(cleanNum);
+            
+            if (!res.headersSent) {
+                res.json({ 
+                    code,
+                    sessionId: id,
+                    expiresIn: SESSION_TIMEOUT
+                });
+            }
+        }
 
-        await delay(100);
-        await Pair_Code_By_Gifted_Tech.ws.close();
-        return await removeFile('./temp/'+id);
-            } else if (connection === "close" && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode != 401) {
-                    await delay(10000);
-                    GIFTED_MD_PAIR_CODE();
+        Pair_Code_By_Gifted_Tech.ev.on('creds.update', saveCreds);
+        
+        Pair_Code_By_Gifted_Tech.ev.on("connection.update", async (update) => {
+            const { connection, lastDisconnect } = update;
+            
+            if (connection === "open") {
+                await delay(2000);
+                const data = fs.readFileSync(`./temp/${id}/creds.json`);
+                const b64data = Buffer.from(data).toString('base64');
+                
+                const sessionMsg = await Pair_Code_By_Gifted_Tech.sendMessage(
+                    Pair_Code_By_Gifted_Tech.user.id, 
+                    { text: b64data }
+                );
+
+                const successMsg = `*Pairing Successful!*\n\n` +
+                    `Your WhatsApp session has been successfully connected.\n` +
+                    `Session ID: ${id}\n\n` +
+                    `_This session will automatically close now._`;
+                
+                await Pair_Code_By_Gifted_Tech.sendMessage(
+                    Pair_Code_By_Gifted_Tech.user.id,
+                    { text: successMsg },
+                    { quoted: sessionMsg }
+                );
+
+                await Pair_Code_By_Gifted_Tech.ws.close();
+                removeSessionFiles(id);
+            } 
+            else if (connection === "close" && lastDisconnect?.error) {
+                if (lastDisconnect.error.output.statusCode !== 401) {
+                    await delay(10_000);
+                    activeSessions.delete(id);
+                    removeSessionFiles(id);
                 }
+            }
+        });
+
+    } catch (err) {
+        console.error("Pairing error:", err);
+        removeSessionFiles(id);
+        
+        if (!res.headersSent) {
+            res.status(500).json({ 
+                error: "Pairing service unavailable",
+                details: err.message
             });
-        } catch (err) {
-            console.log("service restated");
-            await removeFile('./temp/'+id);
-         if(!res.headersSent){
-            await res.send({code:"Service Unavailable"});
-         }
         }
     }
-    return await GIFTED_MD_PAIR_CODE()
 });
-module.exports = router
+
+// Add cleanup endpoint
+router.delete('/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    if (activeSessions.has(sessionId)) {
+        removeSessionFiles(sessionId);
+        res.json({ success: true });
+    } else {
+        res.status(404).json({ error: "Session not found" });
+    }
+});
+
+module.exports = router;
