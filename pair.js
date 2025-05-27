@@ -1,10 +1,7 @@
-const PastebinAPI = require('pastebin-js'),
-pastebin = new PastebinAPI('EMWTMkQAVfJa9kM-MRUrxd5Oku1U7pgL')
-const {makeid} = require('./id');
 const express = require('express');
-const path = require('path');
 const fs = require('fs');
-let router = express.Router()
+const path = require('path');
+const { makeid } = require('./id');
 const pino = require("pino");
 const {
     default: Wasi_Tech,
@@ -14,64 +11,101 @@ const {
     Browsers
 } = require("@whiskeysockets/baileys");
 
+// Enhanced logger configuration
+const logger = pino({
+    level: 'debug',
+    transport: {
+        target: 'pino-pretty',
+        options: {
+            colorize: true,
+            translateTime: 'SYS:dd-mm-yyyy HH:MM:ss',
+            ignore: 'pid,hostname'
+        }
+    }
+});
+
+const router = express.Router();
+
 function removeFile(FilePath) {
-    if (!fs.existsSync(FilePath)) return false;
-    fs.rmSync(FilePath, {
-        recursive: true,
-        force: true
-    })
-};
+    if (fs.existsSync(FilePath)) {
+        try {
+            fs.rmSync(FilePath, { recursive: true, force: true });
+            logger.info(`Successfully removed: ${FilePath}`);
+        } catch (err) {
+            logger.error(`Error removing file ${FilePath}: ${err.message}`);
+        }
+    }
+}
 
 router.get('/', async (req, res) => {
     const id = makeid();
-    let num = req.query.number;
-    
+    const num = req.query.number;
+
+    if (!num || num.replace(/[^0-9]/g, "").length < 11) {
+        return res.status(400).json({ 
+            error: "Invalid number",
+            message: "Please provide a valid WhatsApp number with country code"
+        });
+    }
+
     async function WASI_MD_PAIR_CODE() {
-        const {
-            state,
-            saveCreds
-        } = await useMultiFileAuthState('./temp/' + id)
+        const { state, saveCreds } = await useMultiFileAuthState(`./temp/${id}`);
         
         try {
-            let Pair_Code_By_Wasi_Tech = Wasi_Tech({
+            const Pair_Code_By_Wasi_Tech = Wasi_Tech({
                 auth: {
                     creds: state.creds,
-                    keys: makeCacheableSignalKeyStore(state.keys, pino({level: "fatal"}).child({level: "fatal"}))
+                    keys: makeCacheableSignalKeyStore(state.keys, logger.child({ level: "fatal" }))
                 },
                 printQRInTerminal: false,
-                logger: pino({level: "fatal"}).child({level: "fatal"}),
-                browser: Browsers.macOS("Desktop")
+                logger: logger.child({ level: "fatal" }),
+                browser: Browsers.macOS("Desktop"),
+                connectTimeoutMs: 30000,
+                keepAliveIntervalMs: 25000
             });
 
-            if(!Pair_Code_By_Wasi_Tech.authState.creds.registered) {
+            if (!Pair_Code_By_Wasi_Tech.authState.creds.registered) {
                 await delay(1500);
-                num = num.replace(/[^0-9]/g,'');
-                const code = await Pair_Code_By_Wasi_Tech.requestPairingCode(num);
+                const cleanNumber = num.replace(/[^0-9]/g, '');
                 
-                if(!res.headersSent){
-                    await res.send({code});
+                try {
+                    const code = await Pair_Code_By_Wasi_Tech.requestPairingCode(cleanNumber);
+                    logger.info(`Generated pairing code for ${cleanNumber}`);
+                    
+                    if (!res.headersSent) {
+                        return res.json({ code });
+                    }
+                } catch (pairingError) {
+                    logger.error(`Pairing failed: ${pairingError.message}`);
+                    if (!res.headersSent) {
+                        return res.status(500).json({ 
+                            error: "Pairing failed",
+                            message: "Could not generate pairing code"
+                        });
+                    }
                 }
             }
 
             Pair_Code_By_Wasi_Tech.ev.on('creds.update', saveCreds);
             
-            Pair_Code_By_Wasi_Tech.ev.on("connection.update", async (s) => {
-                const {
-                    connection,
-                    lastDisconnect
-                } = s;
+            Pair_Code_By_Wasi_Tech.ev.on("connection.update", async (update) => {
+                const { connection, lastDisconnect, isNewLogin } = update;
                 
-                if (connection == "open") {
-                    await delay(5000);
-                    let data = fs.readFileSync(__dirname + `/temp/${id}/creds.json`);
-                    await delay(800);
-                    let b64data = Buffer.from(data).toString('base64');
-                    let session = await Pair_Code_By_Wasi_Tech.sendMessage(
-                        Pair_Code_By_Wasi_Tech.user.id, 
-                        { text: '' + b64data }
-                    );
+                if (connection === "open") {
+                    logger.info("Connection established successfully");
+                    await delay(3000);
+                    
+                    try {
+                        const credsPath = path.join(__dirname, `temp/${id}/creds.json`);
+                        const data = fs.readFileSync(credsPath);
+                        const b64data = Buffer.from(data).toString('base64');
+                        
+                        const session = await Pair_Code_By_Wasi_Tech.sendMessage(
+                            Pair_Code_By_Wasi_Tech.user.id, 
+                            { text: b64data }
+                        );
 
-                    let WASI_MD_TEXT = `
+                        const WASI_MD_TEXT = `
 *_Pair Code Connected By Wasi Tech_*
 *_Made With 🤍_*
 ______________________________________
@@ -89,35 +123,54 @@ ______________________________________
 ║❒ *Plugins:* _https://github.com/Itxxwasi 
 ╚════════════════════════╝
 _____________________________________
-
 _Don't Forget To Give Star To My Repo_`;
-                    
-                    await Pair_Code_By_Wasi_Tech.sendMessage(
-                        Pair_Code_By_Wasi_Tech.user.id,
-                        {text: WASI_MD_TEXT},
-                        {quoted: session}
-                    );
 
-                    await delay(100);
-                    await Pair_Code_By_Wasi_Tech.ws.close();
-                    return await removeFile("temp/" + id);
-                } else if (connection === "close" && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode != 401) {
-                    await delay(10000);
-                    WASI_MD_PAIR_CODE();
+                        await Pair_Code_By_Wasi_Tech.sendMessage(
+                            Pair_Code_By_Wasi_Tech.user.id,
+                            { text: WASI_MD_TEXT },
+                            { quoted: session }
+                        );
+
+                        await delay(500);
+                        await Pair_Code_By_Wasi_Tech.ws.close();
+                        removeFile(`./temp/${id}`);
+                    } catch (error) {
+                        logger.error(`Session save failed: ${error.message}`);
+                        removeFile(`./temp/${id}`);
+                    }
+                } else if (connection === "close") {
+                    const error = lastDisconnect?.error;
+                    if (error?.output?.statusCode !== 401) {
+                        logger.error(`Connection closed: ${error?.message || 'Unknown error'}`);
+                        await delay(10000);
+                        removeFile(`./temp/${id}`);
+                        WASI_MD_PAIR_CODE().catch(err => logger.error(err));
+                    }
                 }
             });
         } catch (err) {
+            logger.error(`Critical error: ${err.message}`);
             if (!res.headersSent) {
-                await res.json({
-                    code: "Service is Currently Unavailable"
+                res.status(500).json({ 
+                    error: "Service unavailable",
+                    message: "Please try again later"
                 });
             }
-            console.error("Pairing error:", err);
-            await removeFile("temp/" + id);
+            removeFile(`./temp/${id}`);
         }
     }
-    
-    return await WASI_MD_PAIR_CODE()
+
+    try {
+        await WASI_MD_PAIR_CODE();
+    } catch (err) {
+        logger.error(`Initialization failed: ${err.message}`);
+        if (!res.headersSent) {
+            res.status(500).json({ 
+                error: "Initialization failed",
+                message: "Could not start pairing process"
+            });
+        }
+    }
 });
 
 module.exports = router;
